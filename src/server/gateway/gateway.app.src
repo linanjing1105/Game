@@ -1,0 +1,13 @@
+{application, gateway, [
+	{description, "gateway"},
+	{vsn, "0.0.1"},
+	{modules, []},
+	{registered, [gateway_sup]},
+	{applications, [
+		kernel,
+		stdlib,
+		ranch
+	]},
+	{mod, {gateway_app, []}},
+	{env, []}
+]}.
