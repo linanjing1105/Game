@@ -58,7 +58,7 @@
 
 
 
-
+-record(st_scene_config,{sort=0,on_time_off=0,on_time=0}).
 
 
 -endif.  %%-ifndef('__RECORD_H__').
