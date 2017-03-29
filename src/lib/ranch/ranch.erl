@@ -1,4 +1,4 @@
-%% Copyright (c) 2011-2016, Loïc Hoguin <essen@ninenines.eu>
+%% Copyright (c) 2011-2015, Loïc Hoguin <essen@ninenines.eu>
 %%
 %% Permission to use, copy, modify, and/or distribute this software for any
 %% purpose with or without fee is hereby granted, provided that the above
@@ -25,8 +25,6 @@
 -export([set_max_connections/2]).
 -export([get_protocol_options/1]).
 -export([set_protocol_options/2]).
--export([info/0]).
--export([procs/2]).
 -export([filter_options/3]).
 -export([set_option_default/3]).
 -export([require/1]).
@@ -46,15 +44,15 @@
 
 -spec start_listener(ref(), non_neg_integer(), module(), any(), module(), any())
 	-> supervisor:startchild_ret().
-start_listener(Ref, NumAcceptors, Transport, TransOpts, Protocol, ProtoOpts)
-		when is_integer(NumAcceptors) andalso is_atom(Transport)
+start_listener(Ref, NbAcceptors, Transport, TransOpts, Protocol, ProtoOpts)
+		when is_integer(NbAcceptors) andalso is_atom(Transport)
 		andalso is_atom(Protocol) ->
 	_ = code:ensure_loaded(Transport),
 	case erlang:function_exported(Transport, name, 0) of
 		false ->
 			{error, badarg};
 		true ->
-			Res = supervisor:start_child(ranch_sup, child_spec(Ref, NumAcceptors,
+			Res = supervisor:start_child(ranch_sup, child_spec(Ref, NbAcceptors,
 					Transport, TransOpts, Protocol, ProtoOpts)),
 			Socket = proplists:get_value(socket, TransOpts),
 			case Res of
@@ -74,20 +72,8 @@ start_listener(Ref, NumAcceptors, Transport, TransOpts, Protocol, ProtoOpts)
 				_ ->
 					ok
 			end,
-			maybe_started(Res)
+			Res
 	end.
-
-maybe_started({error, {{shutdown,
-		{failed_to_start_child, ranch_acceptors_sup,
-			{listen_error, _, Reason}}}, _}} = Error) ->
-	start_error(Reason, Error);
-maybe_started(Res) ->
-	Res.
-
-start_error(E=eaddrinuse, _) -> {error, E};
-start_error(E=eacces, _) -> {error, E};
-start_error(E=no_cert, _) -> {error, E};
-start_error(_, Error) -> Error.
 
 -spec stop_listener(ref()) -> ok | {error, not_found}.
 stop_listener(Ref) ->
@@ -101,11 +87,11 @@ stop_listener(Ref) ->
 
 -spec child_spec(ref(), non_neg_integer(), module(), any(), module(), any())
 	-> supervisor:child_spec().
-child_spec(Ref, NumAcceptors, Transport, TransOpts, Protocol, ProtoOpts)
-		when is_integer(NumAcceptors) andalso is_atom(Transport)
+child_spec(Ref, NbAcceptors, Transport, TransOpts, Protocol, ProtoOpts)
+		when is_integer(NbAcceptors) andalso is_atom(Transport)
 		andalso is_atom(Protocol) ->
 	{{ranch_listener_sup, Ref}, {ranch_listener_sup, start_link, [
-		Ref, NumAcceptors, Transport, TransOpts, Protocol, ProtoOpts
+		Ref, NbAcceptors, Transport, TransOpts, Protocol, ProtoOpts
 	]}, permanent, infinity, supervisor, [ranch_listener_sup]}.
 
 -spec accept_ack(ref()) -> ok.
@@ -117,7 +103,7 @@ accept_ack(Ref) ->
 -spec remove_connection(ref()) -> ok.
 remove_connection(Ref) ->
 	ConnsSup = ranch_server:get_connections_sup(Ref),
-	ConnsSup ! {remove_connection, Ref, self()},
+	ConnsSup ! {remove_connection, Ref},
 	ok.
 
 -spec get_addr(ref()) -> {inet:ip_address(), inet:port_number()}.
@@ -145,77 +131,20 @@ get_protocol_options(Ref) ->
 set_protocol_options(Ref, Opts) ->
 	ranch_server:set_protocol_options(Ref, Opts).
 
--spec info() -> [{any(), [{atom(), any()}]}].
-info() ->
-	Children = supervisor:which_children(ranch_sup),
-	[{Ref, listener_info(Ref, Pid)}
-		|| {{ranch_listener_sup, Ref}, Pid, _, [_]} <- Children].
-
-listener_info(Ref, Pid) ->
-	[_, NumAcceptors, Transport, TransOpts, Protocol, _] = listener_start_args(Ref),
-	ConnsSup = ranch_server:get_connections_sup(Ref),
-	{IP, Port} = get_addr(Ref),
-	MaxConns = get_max_connections(Ref),
-	ProtoOpts = get_protocol_options(Ref),
-	[
-		{pid, Pid},
-		{ip, IP},
-		{port, Port},
-		{num_acceptors, NumAcceptors},
-		{max_connections, MaxConns},
-		{active_connections, ranch_conns_sup:active_connections(ConnsSup)},
-		{all_connections, proplists:get_value(active, supervisor:count_children(ConnsSup))},
-		{transport, Transport},
-		{transport_options, TransOpts},
-		{protocol, Protocol},
-		{protocol_options, ProtoOpts}
-	].
-
-listener_start_args(Ref) ->
-	case erlang:function_exported(supervisor, get_childspec, 2) of
-		true ->
-			%% Can't use map syntax before R18.
-			{ok, Map} = supervisor:get_childspec(ranch_sup, {ranch_listener_sup, Ref}),
-			{ranch_listener_sup, start_link, StartArgs} = maps:get(start, Map),
-			StartArgs;
-		false ->
-			%% Awful solution for compatibility with R16 and R17.
-			{status, _, _, [_, _, _, _, [_, _,
-				{data, [{_, {state, _, _, Children, _, _, _, _, _, _}}]}]]}
-				= sys:get_status(ranch_sup),
-			[StartArgs] = [StartArgs || {child, _, {ranch_listener_sup, ChildRef},
-				{ranch_listener_sup, start_link, StartArgs}, _, _, _, _}
-				<- Children, ChildRef =:= Ref],
-			StartArgs
-	end.
-
--spec procs(ref(), acceptors | connections) -> [pid()].
-procs(Ref, acceptors) ->
-	procs1(Ref, ranch_acceptors_sup);
-procs(Ref, connections) ->
-	procs1(Ref, ranch_conns_sup).
-
-procs1(Ref, Sup) ->
-	{_, ListenerSup, _, _} = lists:keyfind({ranch_listener_sup, Ref}, 1,
-		supervisor:which_children(ranch_sup)),
-	{_, SupPid, _, _} = lists:keyfind(Sup, 1,
-		supervisor:which_children(ListenerSup)),
-	[Pid || {_, Pid, _, _} <- supervisor:which_children(SupPid)].
-
 -spec filter_options([inet | inet6 | {atom(), any()} | {raw, any(), any(), any()}],
 	[atom()], Acc) -> Acc when Acc :: [any()].
-filter_options(UserOptions, DisallowedKeys, DefaultOptions) ->
-	AllowedOptions = filter_user_options(UserOptions, DisallowedKeys),
+filter_options(UserOptions, AllowedKeys, DefaultOptions) ->
+	AllowedOptions = filter_user_options(UserOptions, AllowedKeys),
 	lists:foldl(fun merge_options/2, DefaultOptions, AllowedOptions).
 
 %% 2-tuple options.
-filter_user_options([Opt = {Key, _}|Tail], DisallowedKeys) ->
-	case lists:member(Key, DisallowedKeys) of
-		false ->
-			[Opt|filter_user_options(Tail, DisallowedKeys)];
+filter_user_options([Opt = {Key, _}|Tail], AllowedKeys) ->
+	case lists:member(Key, AllowedKeys) of
 		true ->
+			[Opt|filter_user_options(Tail, AllowedKeys)];
+		false ->
 			filter_options_warning(Opt),
-			filter_user_options(Tail, DisallowedKeys)
+			filter_user_options(Tail, AllowedKeys)
 	end;
 %% Special option forms.
 filter_user_options([inet|Tail], AllowedKeys) ->
@@ -224,9 +153,9 @@ filter_user_options([inet6|Tail], AllowedKeys) ->
 	[inet6|filter_user_options(Tail, AllowedKeys)];
 filter_user_options([Opt = {raw, _, _, _}|Tail], AllowedKeys) ->
 	[Opt|filter_user_options(Tail, AllowedKeys)];
-filter_user_options([Opt|Tail], DisallowedKeys) ->
+filter_user_options([Opt|Tail], AllowedKeys) ->
 	filter_options_warning(Opt),
-	filter_user_options(Tail, DisallowedKeys);
+	filter_user_options(Tail, AllowedKeys);
 filter_user_options([], _) ->
 	[].
 
@@ -255,3 +184,4 @@ require([App|Tail]) ->
 		{error, {already_started, App}} -> ok
 	end,
 	require(Tail).
+
