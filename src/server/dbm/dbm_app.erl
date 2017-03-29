@@ -7,6 +7,7 @@
 start(_StartType, _StartArgs) ->    
     {ok, Name} = application:get_env(name),
     {ok, Cookie} = application:get_env(cookie),
+   io:format("Name=~p~n,Cookie~p~n",[Name,Cookie]),
     net_kernel:start([Name, longnames]),
 	util:sleep(1000),
     erlang:set_cookie(node(), Cookie),
