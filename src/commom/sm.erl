@@ -24,12 +24,12 @@ makeall()->
 	io:format("make dbm ok.~n"),
 	 systools:make_script("gateway"),
 	 io:format("make gateway ok.~n"),
-	% systools:make_script("world"),
-	% io:format("make mynet ok.~n"),
+	 systools:make_script("world"),
+	 io:format("make mynet ok.~n"),
 	 systools:make_script("agent_ctr"),
 	 io:format("make agent_ctr ok.~n"),
-	% systools:make_script("scene_ctr"),
-	% io:format("make scene_ctr ok.~n"),
+	 systools:make_script("scene_ctr"),
+	 io:format("make scene_ctr ok.~n"),
 	% systools:make_script("http"),
 	% io:format("make http ok.~n").
 	ok.
