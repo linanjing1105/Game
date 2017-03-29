@@ -1,0 +1,10 @@
+{release, {"game", "R1"}, {erts, "7.3"},
+    [
+    {kernel, "4.2"},
+    {stdlib, "2.8"},
+    {sasl, "2.7"},	
+	{syslog, "0.0.1"},
+    {scene_ctr, "0.0.1"}
+    ]
+}.
+
